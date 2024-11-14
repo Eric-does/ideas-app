@@ -1,10 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronUp, Edit2, Trash2, Heart, MessageSquare } from 'lucide-react';
+import { ChevronDown, ChevronUp, Trash2, Heart, MessageSquare } from 'lucide-react';
 
 export default function IdeasApp() {
-  // Rest of the component code remains exactly the same
   const [userName, setUserName] = useState('');
   const [ideas, setIdeas] = useState([]);
   const [newIdeaTitle, setNewIdeaTitle] = useState('');
@@ -12,7 +11,6 @@ export default function IdeasApp() {
   const [isUserNameSet, setIsUserNameSet] = useState(false);
   const [newComment, setNewComment] = useState('');
 
-  // Load data from localStorage on component mount
   useEffect(() => {
     const savedIdeas = localStorage.getItem('ideas');
     if (savedIdeas) {
@@ -25,12 +23,10 @@ export default function IdeasApp() {
     }
   }, []);
 
-  // Save ideas to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem('ideas', JSON.stringify(ideas));
   }, [ideas]);
 
-  // Save username to localStorage whenever it changes
   useEffect(() => {
     if (userName) {
       localStorage.setItem('userName', userName);
