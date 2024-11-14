@@ -1,7 +1,10 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import { ChevronDown, ChevronUp, Edit2, Trash2, Heart, MessageSquare } from 'lucide-react';
 
 export default function IdeasApp() {
+  // Rest of the component code remains exactly the same
   const [userName, setUserName] = useState('');
   const [ideas, setIdeas] = useState([]);
   const [newIdeaTitle, setNewIdeaTitle] = useState('');
