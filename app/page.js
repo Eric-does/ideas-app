@@ -44,7 +44,6 @@ const IdeaSubmissionApp = () => {
   const [editingComment, setEditingComment] = useState({ ideaIndex: null, commentIndex: null });
   const [editingCommentText, setEditingCommentText] = useState('');
 
-  // Load ideas from localStorage on initial render
   useEffect(() => {
     const savedIdeas = localStorage.getItem('ideas');
     if (savedIdeas) {
@@ -52,7 +51,6 @@ const IdeaSubmissionApp = () => {
     }
   }, []);
 
-  // Save ideas to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem('ideas', JSON.stringify(ideas));
   }, [ideas]);
@@ -84,7 +82,68 @@ const IdeaSubmissionApp = () => {
     }
   };
 
-  // ... (keep all the other functions from the previous version)
+  const startEditingIdea = (index) => {
+    setEditingIdea(index);
+    setEditingIdeaTitle(ideas[index].title);
+    setEditingIdeaDescription(ideas[index].description);
+  };
+
+  const saveIdeaEdit = (index) => {
+    if (editingIdeaTitle.trim()) {
+      const updatedIdeas = [...ideas];
+      updatedIdeas[index] = {
+        ...updatedIdeas[index],
+        title: editingIdeaTitle,
+        description: editingIdeaDescription
+      };
+      setIdeas(updatedIdeas);
+      setEditingIdea(null);
+      setEditingIdeaTitle('');
+      setEditingIdeaDescription('');
+    }
+  };
+
+  const deleteIdea = (index) => {
+    const updatedIdeas = [...ideas];
+    updatedIdeas.splice(index, 1);
+    setIdeas(updatedIdeas);
+    if (expandedIndex === index) {
+      setExpandedIndex(-1);
+    }
+  };
+
+  const toggleExpand = (index) => {
+    setExpandedIndex(expandedIndex === index ? -1 : index);
+  };
+
+  const addComment = (index) => {
+    if (isNameSubmitted && newCommentText.trim()) {
+      const updatedIdeas = [...ideas];
+      updatedIdeas[index].comments.push({
+        name: userName,
+        text: newCommentText,
+        likes: 0,
+        likedUsers: []
+      });
+      setIdeas(updatedIdeas);
+      setNewCommentText('');
+    }
+  };
+
+  const likeComment = (ideaIndex, commentIndex) => {
+    if (isNameSubmitted) {
+      const updatedIdeas = [...ideas];
+      const comment = updatedIdeas[ideaIndex].comments[commentIndex];
+      if (!comment.likedUsers.includes(userName)) {
+        comment.likes++;
+        comment.likedUsers.push(userName);
+      } else {
+        comment.likes--;
+        comment.likedUsers = comment.likedUsers.filter(name => name !== userName);
+      }
+      setIdeas(updatedIdeas);
+    }
+  };
 
   return (
     <div className="max-w-4xl mx-auto p-4">
@@ -104,7 +163,144 @@ const IdeaSubmissionApp = () => {
               <Button onClick={submitName}>Submit</Button>
             </div>
           ) : (
-            // ... (keep the rest of the JSX from the previous version, but replace shadcn components with our simple ones)
+            <>
+              <div className="mb-4">
+                <Input
+                  placeholder="New Idea Title"
+                  value={newIdeaTitle}
+                  onChange={(e) => setNewIdeaTitle(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') submitIdea();
+                  }}
+                />
+                <Input
+                  placeholder="New Idea Description (optional)"
+                  value={newIdeaDescription}
+                  onChange={(e) => setNewIdeaDescription(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') submitIdea();
+                  }}
+                />
+                <Button onClick={submitIdea}>Submit Idea</Button>
+              </div>
+              {ideas.map((idea, index) => (
+                <Card key={index} className="mb-4">
+                  <CardHeader>
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        {editingIdea === index ? (
+                          <div>
+                            <Input
+                              value={editingIdeaTitle}
+                              onChange={(e) => setEditingIdeaTitle(e.target.value)}
+                              onKeyPress={(e) => {
+                                if (e.key === 'Enter') saveIdeaEdit(index);
+                              }}
+                            />
+                            <Input
+                              value={editingIdeaDescription}
+                              onChange={(e) => setEditingIdeaDescription(e.target.value)}
+                              placeholder="Description (optional)"
+                              className="mt-2"
+                            />
+                            <div className="flex gap-2 mt-2">
+                              <Button onClick={() => saveIdeaEdit(index)} size="sm">
+                                <Check className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                onClick={() => setEditingIdea(null)}
+                                className="bg-gray-500 hover:bg-gray-600"
+                              >
+                                <X className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <h2 className="text-xl font-bold">{idea.title}</h2>
+                            {idea.description && <p className="mt-2">{idea.description}</p>}
+                          </>
+                        )}
+                        <span className="text-gray-500 text-sm">Submitted by {idea.submittedBy}</span>
+                      </div>
+                      {idea.submittedBy === userName && editingIdea !== index && (
+                        <div className="flex gap-2">
+                          <button
+                            className="text-blue-500 hover:text-blue-700"
+                            onClick={() => startEditingIdea(index)}
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            className="text-red-500 hover:text-red-700"
+                            onClick={() => deleteIdea(index)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center justify-between">
+                      <Button
+                        onClick={() => upvoteIdea(index)}
+                        className={idea.votedUsers.includes(userName) ? 'bg-blue-700' : ''}
+                      >
+                        Upvote ({idea.votes})
+                      </Button>
+                      <button
+                        className="text-gray-500 hover:text-gray-700"
+                        onClick={() => toggleExpand(index)}
+                      >
+                        {expandedIndex === index ? (
+                          <ChevronUp className="w-5 h-5" />
+                        ) : (
+                          <ChevronDown className="w-5 h-5" />
+                        )}
+                      </button>
+                    </div>
+                    {expandedIndex === index && (
+                      <div className="mt-4">
+                        <div>
+                          <Input
+                            placeholder="Leave a Comment"
+                            value={newCommentText}
+                            onChange={(e) => setNewCommentText(e.target.value)}
+                            onKeyPress={(e) => {
+                              if (e.key === 'Enter') addComment(index);
+                            }}
+                          />
+                          <Button onClick={() => addComment(index)}>Comment</Button>
+                        </div>
+                        {idea.comments.length > 0 && (
+                          <div className="mt-4">
+                            <h3 className="font-medium mb-2">Comments</h3>
+                            {idea.comments.map((comment, commentIndex) => (
+                              <div key={commentIndex} className="bg-gray-100 p-2 mb-2 rounded">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-medium">Comment by {comment.name}</span>
+                                  <button
+                                    className={`text-red-500 hover:text-red-700 ${
+                                      comment.likedUsers.includes(userName) ? 'font-bold' : ''
+                                    }`}
+                                    onClick={() => likeComment(index, commentIndex)}
+                                  >
+                                    <Heart className="w-4 h-4 inline-block mr-1" />
+                                    {comment.likes}
+                                  </button>
+                                </div>
+                                <p>{comment.text}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </>
           )}
         </CardContent>
       </Card>
