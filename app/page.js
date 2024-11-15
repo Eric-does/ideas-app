@@ -69,26 +69,34 @@ export default function IdeasApp() {
     }
   };
 
-  const handleNewIdeaSubmit = async (e) => {
+    const handleNewIdeaSubmit = async (e) => {
     e.preventDefault();
     if (newIdeaTitle.trim()) {
-      const newIdea = {
-        title: newIdeaTitle,
-        description: newIdeaDescription,
-        author: userName,
-        votes: 0,
-        voters: [],
-      };
-
-      const { error } = await supabase
-        .from('ideas')
-        .insert([newIdea]);
-
-      if (error) {
-        console.error('Error inserting idea:', error);
-      } else {
-        setNewIdeaTitle('');
-        setNewIdeaDescription('');
+      try {
+        const newIdea = {
+          title: newIdeaTitle,
+          description: newIdeaDescription || '', // ensure description is never null
+          author: userName,
+          votes: 0,
+          voters: [], // Supabase expects a proper array here
+          created_at: new Date().toISOString()
+        };
+  
+        const { data, error } = await supabase
+          .from('ideas')
+          .insert([newIdea])
+          .select();
+  
+        if (error) {
+          console.error('Error details:', error);
+          alert('Failed to submit idea. Please try again.');
+        } else {
+          setNewIdeaTitle('');
+          setNewIdeaDescription('');
+        }
+      } catch (err) {
+        console.error('Submission error:', err);
+        alert('Failed to submit idea. Please try again.');
       }
     }
   };
