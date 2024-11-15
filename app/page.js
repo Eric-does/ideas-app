@@ -280,12 +280,9 @@ export default function IdeasApp() {
                         <div className="flex justify-between items-start">
                           <div className="flex-1">
                             <p className="text-gray-800">{comment.text}</p>
-                            <div className="mt-1 text-sm text-gray-500">
-                              <p>By {comment.author}</p>
-                              {comment.timestamp && (
-                                <p>{new Date(comment.timestamp).toLocaleString()}</p>
-                              )}
-                            </div>
+                            <p className="mt-1 text-sm text-gray-500">
+                              By {comment.author}
+                            </p>
                           </div>
                           <div className="flex items-center space-x-2">
                             <button
@@ -311,7 +308,7 @@ export default function IdeasApp() {
                           </div>
                         </div>
                       </div>
-                  ))}
+                    ))}
                 </div>
               )}
             </div>
