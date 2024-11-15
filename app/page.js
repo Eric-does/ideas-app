@@ -25,9 +25,11 @@ export default function IdeasPage() {
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        // Get current user
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-        setUser(currentUser);
+        // Get current user from localStorage
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) {
+          setUser(JSON.parse(storedUser));
+        }
 
         // Fetch ideas
         const { data: ideasData, error: ideasError } = await supabase
@@ -134,6 +136,7 @@ export default function IdeasPage() {
       title: newIdea,
       description: newIdeaDescription,
       user_id: user.id,
+      user_name: user.name, // Add user's name
       created_at: new Date().toISOString(),
       votes: 0
     };
@@ -148,6 +151,7 @@ export default function IdeasPage() {
           title: newIdea,
           description: newIdeaDescription,
           user_id: user.id,
+          user_name: user.name, // Add user's name
           votes: 0
         }]);
 
@@ -180,6 +184,7 @@ export default function IdeasPage() {
       id: crypto.randomUUID(),
       idea_id: ideaId,
       user_id: user.id,
+      user_name: user.name, // Add user's name
       content: commentText,
       created_at: new Date().toISOString()
     };
@@ -196,6 +201,7 @@ export default function IdeasPage() {
         .insert([{
           idea_id: ideaId,
           user_id: user.id,
+          user_name: user.name, // Add user's name
           content: commentText
         }]);
 
@@ -254,6 +260,12 @@ export default function IdeasPage() {
 
     const ideaToDelete = ideas.find(idea => idea.id === ideaId);
     
+    // Check if the user owns this idea
+    if (ideaToDelete.user_id !== user.id) {
+      toast.error('You can only delete your own ideas');
+      return;
+    }
+
     // Optimistic update
     setIdeas(prev => prev.filter(idea => idea.id !== ideaId));
 
@@ -281,6 +293,12 @@ export default function IdeasPage() {
     }
 
     const commentToDelete = comments[ideaId]?.find(comment => comment.id === commentId);
+
+    // Check if the user owns this comment
+    if (commentToDelete.user_id !== user.id) {
+      toast.error('You can only delete your own comments');
+      return;
+    }
 
     // Optimistic update
     setComments(prev => ({
@@ -338,6 +356,7 @@ export default function IdeasPage() {
                 <div className="space-y-2">
                   <h3 className="text-lg font-semibold">{idea.title}</h3>
                   <p className="text-gray-600">{idea.description}</p>
+                  <p className="text-sm text-gray-500">Posted by {idea.user_name}</p>
                 </div>
                 {user?.id === idea.user_id && (
                   <Button
@@ -368,7 +387,10 @@ export default function IdeasPage() {
               <div className="space-y-4">
                 {comments[idea.id]?.map((comment) => (
                   <div key={comment.id} className="flex justify-between items-start bg-gray-50 p-3 rounded">
-                    <p>{comment.content}</p>
+                    <div>
+                      <p>{comment.content}</p>
+                      <p className="text-sm text-gray-500 mt-1">By {comment.user_name}</p>
+                    </div>
                     {user?.id === comment.user_id && (
                       <Button
                         variant="ghost"
