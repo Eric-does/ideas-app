@@ -29,31 +29,20 @@ export default function IdeasPage() {
         const { data: { user: currentUser } } = await supabase.auth.getUser();
         setUser(currentUser);
 
-        // Fetch ideas with votes count
+        // Fetch ideas
         const { data: ideasData, error: ideasError } = await supabase
           .from('ideas')
-          .select(`
-            *,
-            votes:idea_votes(count),
-            comments:idea_comments(count)
-          `)
+          .select('*')
           .order('created_at', { ascending: false });
 
         if (ideasError) throw ideasError;
 
-        // Format votes count
-        const formattedIdeas = ideasData.map(idea => ({
-          ...idea,
-          votes: idea.votes[0]?.count || 0,
-          comments: idea.comments[0]?.count || 0
-        }));
-
-        setIdeas(formattedIdeas);
+        setIdeas(ideasData);
         setLoading(false);
 
-        // Fetch all comments
+        // Fetch comments
         const { data: commentsData, error: commentsError } = await supabase
-          .from('idea_comments')
+          .from('comments')
           .select('*')
           .order('created_at', { ascending: true });
 
@@ -77,7 +66,7 @@ export default function IdeasPage() {
 
     // Set up real-time subscriptions
     const ideasSubscription = supabase
-      .channel('ideas-channel')
+      .channel('ideas-changes')
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
@@ -86,27 +75,17 @@ export default function IdeasPage() {
       .subscribe();
 
     const commentsSubscription = supabase
-      .channel('comments-channel')
+      .channel('comments-changes')
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
-        table: 'idea_comments'
+        table: 'comments'
       }, handleCommentsChange)
-      .subscribe();
-
-    const votesSubscription = supabase
-      .channel('votes-channel')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'idea_votes'
-      }, handleVotesChange)
       .subscribe();
 
     return () => {
       ideasSubscription.unsubscribe();
       commentsSubscription.unsubscribe();
-      votesSubscription.unsubscribe();
     };
   }, [supabase, router]);
 
@@ -138,23 +117,6 @@ export default function IdeasPage() {
     }
   };
 
-  const handleVotesChange = async (payload) => {
-    // Refresh votes count for the affected idea
-    const { data, error } = await supabase
-      .from('idea_votes')
-      .select('count')
-      .eq('idea_id', payload.new.idea_id)
-      .single();
-
-    if (!error) {
-      setIdeas(prev => prev.map(idea =>
-        idea.id === payload.new.idea_id
-          ? { ...idea, votes: data.count }
-          : idea
-      ));
-    }
-  };
-
   const submitIdea = async (e) => {
     e.preventDefault();
     if (!user) {
@@ -173,8 +135,7 @@ export default function IdeasPage() {
       description: newIdeaDescription,
       user_id: user.id,
       created_at: new Date().toISOString(),
-      votes: 0,
-      comments: 0
+      votes: 0
     };
 
     // Optimistic update
@@ -186,7 +147,8 @@ export default function IdeasPage() {
         .insert([{
           title: newIdea,
           description: newIdeaDescription,
-          user_id: user.id
+          user_id: user.id,
+          votes: 0
         }]);
 
       if (error) throw error;
@@ -219,8 +181,7 @@ export default function IdeasPage() {
       idea_id: ideaId,
       user_id: user.id,
       content: commentText,
-      created_at: new Date().toISOString(),
-      likes: 0
+      created_at: new Date().toISOString()
     };
 
     // Optimistic update
@@ -231,7 +192,7 @@ export default function IdeasPage() {
 
     try {
       const { error } = await supabase
-        .from('idea_comments')
+        .from('comments')
         .insert([{
           idea_id: ideaId,
           user_id: user.id,
@@ -268,9 +229,9 @@ export default function IdeasPage() {
 
     try {
       const { error } = await supabase
-        .rpc('toggle_vote', {
-          idea_id: ideaId
-        });
+        .from('ideas')
+        .update({ votes: currentVotes + 1 })
+        .eq('id', ideaId);
 
       if (error) throw error;
     } catch (error) {
@@ -329,7 +290,7 @@ export default function IdeasPage() {
 
     try {
       const { error } = await supabase
-        .from('idea_comments')
+        .from('comments')
         .delete()
         .eq('id', commentId)
         .eq('user_id', user.id);
@@ -393,10 +354,10 @@ export default function IdeasPage() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => toggleVote(idea.id, idea.votes)}
+                  onClick={() => toggleVote(idea.id, idea.votes || 0)}
                 >
                   <ThumbsUp className="h-4 w-4 mr-2" />
-                  {idea.votes}
+                  {idea.votes || 0}
                 </Button>
                 <Button variant="ghost" size="sm">
                   <MessageSquare className="h-4 w-4 mr-2" />
