@@ -234,16 +234,12 @@ export default function IdeasApp() {
 
               <div className="mt-4 flex items-center space-x-4">
                 <button
-                  onClick={() => handleVote(idea.id)}
-                  className={`flex items-center space-x-1 px-3 py-1 rounded-md transition-colors ${
-                    idea.voters.includes(userName)
-                      ? 'bg-blue-100 text-blue-600'
-                      : 'text-gray-500 hover:bg-gray-100'
-                  }`}
-                >
-                  <ChevronUp size={18} />
-                  <span>{idea.votes}</span>
-                </button>
+  onClick={() => handleVote(idea.id)}
+  className="flex items-center space-x-1 px-3 py-1 rounded-md transition-all bg-blue-100 text-blue-600 hover:font-bold"
+>
+  <ChevronUp size={18} />
+  <span>{idea.votes}</span>
+</button>
 
                 <button
                   onClick={() => toggleExpand(idea.id)}
