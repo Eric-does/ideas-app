@@ -17,10 +17,7 @@ export default function IdeasApp() {
     async function fetchIdeas() {
       const { data, error } = await supabase
         .from('ideas')
-        .select(`
-          *,
-          comments (*)
-        `)
+        .select('*')
         .order('created_at', { ascending: false });
       
       if (error) {
