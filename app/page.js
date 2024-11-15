@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ChevronDown, ChevronUp, Trash2, Heart, MessageSquare } from 'lucide-react';
+import { supabase } from '../utils/supabase';
 
 export default function IdeasApp() {
   const [userName, setUserName] = useState('');
@@ -13,20 +14,47 @@ export default function IdeasApp() {
   const [expandedIdeaId, setExpandedIdeaId] = useState(null);
 
   useEffect(() => {
-    const savedIdeas = localStorage.getItem('ideas');
-    if (savedIdeas) {
-      setIdeas(JSON.parse(savedIdeas));
+    // Get initial ideas
+    async function fetchIdeas() {
+      const { data, error } = await supabase
+        .from('ideas')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('Error fetching ideas:', error);
+      } else {
+        setIdeas(data || []);
+      }
     }
+
+    // Subscribe to real-time changes
+    const channel = supabase
+      .channel('ideas-channel')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'ideas' },
+        (payload) => {
+          console.log('Real-time update:', payload);
+          fetchIdeas(); // Reload ideas when changes occur
+      })
+      .subscribe();
+
+    // Fetch initial data
+    fetchIdeas();
+
+    // Cleanup subscription when component unmounts
+    return () => {
+      channel.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     const savedUserName = localStorage.getItem('userName');
     if (savedUserName) {
       setUserName(savedUserName);
       setIsUserNameSet(true);
     }
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem('ideas', JSON.stringify(ideas));
-  }, [ideas]);
 
   useEffect(() => {
     if (userName) {
@@ -41,45 +69,64 @@ export default function IdeasApp() {
     }
   };
 
-  const handleNewIdeaSubmit = (e) => {
+  const handleNewIdeaSubmit = async (e) => {
     e.preventDefault();
     if (newIdeaTitle.trim()) {
       const newIdea = {
-        id: Date.now(),
         title: newIdeaTitle,
         description: newIdeaDescription,
+        author: userName,
         votes: 0,
         voters: [],
-        comments: [],
-        author: userName
       };
-      setIdeas([...ideas, newIdea]);
-      setNewIdeaTitle('');
-      setNewIdeaDescription('');
+
+      const { error } = await supabase
+        .from('ideas')
+        .insert([newIdea]);
+
+      if (error) {
+        console.error('Error inserting idea:', error);
+      } else {
+        setNewIdeaTitle('');
+        setNewIdeaDescription('');
+      }
     }
   };
 
-  const handleVote = (ideaId) => {
-    setIdeas(ideas.map(idea => {
-      if (idea.id === ideaId) {
-        const hasVoted = idea.voters.includes(userName);
-        return {
-          ...idea,
-          votes: hasVoted ? idea.votes - 1 : idea.votes + 1,
-          voters: hasVoted 
-            ? idea.voters.filter(voter => voter !== userName)
-            : [...idea.voters, userName]
-        };
-      }
-      return idea;
-    }));
+  const handleVote = async (ideaId) => {
+    const idea = ideas.find(i => i.id === ideaId);
+    if (!idea) return;
+
+    const hasVoted = idea.voters.includes(userName);
+    const newVoters = hasVoted 
+      ? idea.voters.filter(voter => voter !== userName)
+      : [...idea.voters, userName];
+    
+    const { error } = await supabase
+      .from('ideas')
+      .update({ 
+        votes: hasVoted ? idea.votes - 1 : idea.votes + 1,
+        voters: newVoters
+      })
+      .eq('id', ideaId);
+
+    if (error) {
+      console.error('Error updating vote:', error);
+    }
   };
 
-  const handleDelete = (ideaId) => {
-    setIdeas(ideas.filter(idea => idea.id !== ideaId));
+  const handleDelete = async (ideaId) => {
+    const { error } = await supabase
+      .from('ideas')
+      .delete()
+      .eq('id', ideaId);
+
+    if (error) {
+      console.error('Error deleting idea:', error);
+    }
   };
 
-  const handleCommentSubmit = (ideaId, e) => {
+  const handleCommentSubmit = async (ideaId, e) => {
     if (e && e.key === 'Enter') {
       e.preventDefault();
     } else if (e && e.type === 'keypress' && e.key !== 'Enter') {
@@ -87,65 +134,64 @@ export default function IdeasApp() {
     }
     
     if (newComment.trim()) {
-      setIdeas(ideas.map(idea => {
-        if (idea.id === ideaId) {
-          const newCommentObj = {
-            id: Date.now(),
-            text: newComment,
-            author: userName,
-            likes: 0,
-            likedBy: [],
-            timestamp: new Date().toISOString()
-          };
-          return {
-            ...idea,
-            comments: [...idea.comments, newCommentObj]
-          };
-        }
-        return idea;
-      }));
-      setNewComment('');
+      const newCommentObj = {
+        idea_id: ideaId,
+        text: newComment,
+        author: userName,
+        likes: 0,
+        liked_by: []
+      };
+
+      const { error } = await supabase
+        .from('comments')
+        .insert([newCommentObj]);
+
+      if (error) {
+        console.error('Error inserting comment:', error);
+      } else {
+        setNewComment('');
+      }
     }
   };
 
-  const handleCommentDelete = (ideaId, commentId) => {
-    setIdeas(ideas.map(idea => {
-      if (idea.id === ideaId) {
-        return {
-          ...idea,
-          comments: idea.comments.filter(comment => comment.id !== commentId)
-        };
-      }
-      return idea;
-    }));
+  const handleCommentDelete = async (ideaId, commentId) => {
+    const { error } = await supabase
+      .from('comments')
+      .delete()
+      .eq('id', commentId);
+
+    if (error) {
+      console.error('Error deleting comment:', error);
+    }
   };
 
   const toggleExpand = (ideaId) => {
     setExpandedIdeaId(expandedIdeaId === ideaId ? null : ideaId);
   };
 
-  const handleCommentLike = (ideaId, commentId) => {
-    setIdeas(ideas.map(idea => {
-      if (idea.id === ideaId) {
-        return {
-          ...idea,
-          comments: idea.comments.map(comment => {
-            if (comment.id === commentId) {
-              const hasLiked = comment.likedBy.includes(userName);
-              return {
-                ...comment,
-                likes: hasLiked ? comment.likes - 1 : comment.likes + 1,
-                likedBy: hasLiked 
-                  ? comment.likedBy.filter(liker => liker !== userName)
-                  : [...comment.likedBy, userName]
-              };
-            }
-            return comment;
-          })
-        };
-      }
-      return idea;
-    }));
+  const handleCommentLike = async (ideaId, commentId) => {
+    const idea = ideas.find(i => i.id === ideaId);
+    if (!idea) return;
+
+    const comment = idea.comments.find(c => c.id === commentId);
+    if (!comment) return;
+
+    const hasLiked = comment.liked_by.includes(userName);
+    const newLikedBy = hasLiked 
+      ? comment.liked_by.filter(liker => liker !== userName)
+      : [...comment.liked_by, userName];
+
+    const { error } = await supabase
+      .from('comments')
+      .update({ 
+        likes: hasLiked ? comment.likes - 1 : comment.likes + 1,
+        liked_by: newLikedBy
+      })
+      .eq('id', commentId);
+
+    if (error) {
+      console.error('Error updating comment like:', error);
+    }
   };
 
   if (!isUserNameSet) {
@@ -247,7 +293,7 @@ export default function IdeasApp() {
                   className="flex items-center space-x-1 text-gray-500 hover:text-gray-700 transition-colors"
                 >
                   <MessageSquare size={18} />
-                  <span>{idea.comments.length}</span>
+                  <span>{idea.comments ? idea.comments.length : 0}</span>
                   {expandedIdeaId === idea.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
                 </button>
               </div>
@@ -273,7 +319,7 @@ export default function IdeasApp() {
                     </div>
                   </div>
 
-                  {[...idea.comments]
+                  {idea.comments && [...idea.comments]
                     .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
                     .map(comment => (
                       <div key={comment.id} className="bg-gray-50 rounded-md p-4">
@@ -288,7 +334,7 @@ export default function IdeasApp() {
                             <button
                               onClick={() => handleCommentLike(idea.id, comment.id)}
                               className={`flex items-center space-x-1 px-2 py-1 rounded-md transition-colors ${
-                                comment.likedBy.includes(userName)
+                                comment.liked_by && comment.liked_by.includes(userName)
                                   ? 'text-red-500'
                                   : 'text-gray-400 hover:text-red-500'
                               }`}
