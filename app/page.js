@@ -3,10 +3,10 @@
 import { useEffect, useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { useRouter } from 'next/navigation';
-import { Card, CardContent } from '../components/ui/card.jsx';
-import { Button } from '../components/ui/button.jsx';
-import { Input } from '../components/ui/input.jsx';
-import { Textarea } from '../components/ui/textarea.jsx';
+import { Card, CardContent } from '../components/ui/card.js';
+import { Button } from '../components/ui/button.js';
+import { Input } from '../components/ui/input.js';
+import { Textarea } from '../components/ui/textarea.js';
 import { ThumbsUp, MessageSquare, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
