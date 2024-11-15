@@ -94,7 +94,8 @@ export default function IdeasApp() {
             text: newComment,
             author: userName,
             likes: 0,
-            likedBy: []
+            likedBy: [],
+            timestamp: new Date().toISOString()
           };
           return {
             ...idea,
@@ -272,39 +273,44 @@ export default function IdeasApp() {
                     </div>
                   </div>
 
-                  {idea.comments.map(comment => (
-                    <div key={comment.id} className="bg-gray-50 rounded-md p-4">
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <p className="text-gray-800">{comment.text}</p>
-                          <p className="mt-1 text-sm text-gray-500">
-                            By {comment.author}
-                          </p>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <button
-                            onClick={() => handleCommentLike(idea.id, comment.id)}
-                            className={`flex items-center space-x-1 px-2 py-1 rounded-md transition-colors ${
-                              comment.likedBy.includes(userName)
-                                ? 'text-red-500'
-                                : 'text-gray-400 hover:text-red-500'
-                            }`}
-                          >
-                            <Heart size={16} />
-                            <span className="text-sm">{comment.likes}</span>
-                          </button>
-                          {comment.author === userName && (
+                  {[...idea.comments]
+                    .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+                    .map(comment => (
+                      <div key={comment.id} className="bg-gray-50 rounded-md p-4">
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <p className="text-gray-800">{comment.text}</p>
+                            <div className="mt-1 text-sm text-gray-500">
+                              <p>By {comment.author}</p>
+                              {comment.timestamp && (
+                                <p>{new Date(comment.timestamp).toLocaleString()}</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
                             <button
-                              onClick={() => handleCommentDelete(idea.id, comment.id)}
-                              className="text-gray-400 hover:text-red-500 transition-colors p-1 rounded-md"
-                              title="Delete comment"
+                              onClick={() => handleCommentLike(idea.id, comment.id)}
+                              className={`flex items-center space-x-1 px-2 py-1 rounded-md transition-colors ${
+                                comment.likedBy.includes(userName)
+                                  ? 'text-red-500'
+                                  : 'text-gray-400 hover:text-red-500'
+                              }`}
                             >
-                              <Trash2 size={16} />
+                              <Heart size={16} />
+                              <span className="text-sm">{comment.likes}</span>
                             </button>
-                          )}
+                            {comment.author === userName && (
+                              <button
+                                onClick={() => handleCommentDelete(idea.id, comment.id)}
+                                className="text-gray-400 hover:text-red-500 transition-colors p-1 rounded-md"
+                                title="Delete comment"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
                   ))}
                 </div>
               )}
