@@ -14,11 +14,13 @@ export default function IdeasApp() {
   const [expandedIdeaId, setExpandedIdeaId] = useState(null);
 
   useEffect(() => {
-    // Get initial ideas
     async function fetchIdeas() {
       const { data, error } = await supabase
         .from('ideas')
-        .select('*')
+        .select(`
+          *,
+          comments (*)
+        `)
         .order('created_at', { ascending: false });
       
       if (error) {
@@ -28,21 +30,17 @@ export default function IdeasApp() {
       }
     }
 
-    // Subscribe to real-time changes
     const channel = supabase
       .channel('ideas-channel')
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'ideas' },
         (payload) => {
-          console.log('Real-time update:', payload);
-          fetchIdeas(); // Reload ideas when changes occur
+          fetchIdeas();
       })
       .subscribe();
 
-    // Fetch initial data
     fetchIdeas();
 
-    // Cleanup subscription when component unmounts
     return () => {
       channel.unsubscribe();
     };
@@ -69,24 +67,22 @@ export default function IdeasApp() {
     }
   };
 
-    const handleNewIdeaSubmit = async (e) => {
+  const handleNewIdeaSubmit = async (e) => {
     e.preventDefault();
     if (newIdeaTitle.trim()) {
       try {
         const newIdea = {
           title: newIdeaTitle,
-          description: newIdeaDescription || '', // ensure description is never null
+          description: newIdeaDescription || '',
           author: userName,
           votes: 0,
-          voters: [], // Supabase expects a proper array here
-          created_at: new Date().toISOString()
+          voters: []
         };
-  
-        const { data, error } = await supabase
+
+        const { error } = await supabase
           .from('ideas')
-          .insert([newIdea])
-          .select();
-  
+          .insert([newIdea]);
+
         if (error) {
           console.error('Error details:', error);
           alert('Failed to submit idea. Please try again.');
@@ -105,15 +101,15 @@ export default function IdeasApp() {
     const idea = ideas.find(i => i.id === ideaId);
     if (!idea) return;
 
-    const hasVoted = idea.voters.includes(userName);
+    const hasVoted = idea.voters?.includes(userName);
     const newVoters = hasVoted 
-      ? idea.voters.filter(voter => voter !== userName)
-      : [...idea.voters, userName];
+      ? (idea.voters || []).filter(voter => voter !== userName)
+      : [...(idea.voters || []), userName];
     
     const { error } = await supabase
       .from('ideas')
       .update({ 
-        votes: hasVoted ? idea.votes - 1 : idea.votes + 1,
+        votes: hasVoted ? (idea.votes || 0) - 1 : (idea.votes || 0) + 1,
         voters: newVoters
       })
       .eq('id', ideaId);
@@ -142,22 +138,28 @@ export default function IdeasApp() {
     }
     
     if (newComment.trim()) {
-      const newCommentObj = {
-        idea_id: ideaId,
-        text: newComment,
-        author: userName,
-        likes: 0,
-        liked_by: []
-      };
+      try {
+        const newCommentObj = {
+          idea_id: ideaId,
+          text: newComment,
+          author: userName,
+          likes: 0,
+          liked_by: []
+        };
 
-      const { error } = await supabase
-        .from('comments')
-        .insert([newCommentObj]);
+        const { error } = await supabase
+          .from('comments')
+          .insert([newCommentObj]);
 
-      if (error) {
-        console.error('Error inserting comment:', error);
-      } else {
-        setNewComment('');
+        if (error) {
+          console.error('Error details:', error);
+          alert('Failed to submit comment. Please try again.');
+        } else {
+          setNewComment('');
+        }
+      } catch (err) {
+        console.error('Comment submission error:', err);
+        alert('Failed to submit comment. Please try again.');
       }
     }
   };
@@ -178,21 +180,21 @@ export default function IdeasApp() {
   };
 
   const handleCommentLike = async (ideaId, commentId) => {
-    const idea = ideas.find(i => i.id === ideaId);
-    if (!idea) return;
-
-    const comment = idea.comments.find(c => c.id === commentId);
+    const comment = ideas
+      .find(i => i.id === ideaId)?.comments
+      ?.find(c => c.id === commentId);
+    
     if (!comment) return;
 
-    const hasLiked = comment.liked_by.includes(userName);
+    const hasLiked = comment.liked_by?.includes(userName);
     const newLikedBy = hasLiked 
-      ? comment.liked_by.filter(liker => liker !== userName)
-      : [...comment.liked_by, userName];
+      ? (comment.liked_by || []).filter(liker => liker !== userName)
+      : [...(comment.liked_by || []), userName];
 
     const { error } = await supabase
       .from('comments')
       .update({ 
-        likes: hasLiked ? comment.likes - 1 : comment.likes + 1,
+        likes: hasLiked ? (comment.likes || 0) - 1 : (comment.likes || 0) + 1,
         liked_by: newLikedBy
       })
       .eq('id', commentId);
@@ -293,7 +295,7 @@ export default function IdeasApp() {
                   className="flex items-center space-x-1 px-3 py-1 rounded-md transition-all bg-blue-100 text-blue-600 hover:font-bold"
                 >
                   <ChevronUp size={18} />
-                  <span>{idea.votes}</span>
+                  <span>{idea.votes || 0}</span>
                 </button>
 
                 <button
@@ -301,7 +303,7 @@ export default function IdeasApp() {
                   className="flex items-center space-x-1 text-gray-500 hover:text-gray-700 transition-colors"
                 >
                   <MessageSquare size={18} />
-                  <span>{idea.comments ? idea.comments.length : 0}</span>
+                  <span>{idea.comments?.length || 0}</span>
                   {expandedIdeaId === idea.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
                 </button>
               </div>
@@ -328,7 +330,7 @@ export default function IdeasApp() {
                   </div>
 
                   {idea.comments && [...idea.comments]
-                    .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+                    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
                     .map(comment => (
                       <div key={comment.id} className="bg-gray-50 rounded-md p-4">
                         <div className="flex justify-between items-start">
@@ -342,13 +344,13 @@ export default function IdeasApp() {
                             <button
                               onClick={() => handleCommentLike(idea.id, comment.id)}
                               className={`flex items-center space-x-1 px-2 py-1 rounded-md transition-colors ${
-                                comment.liked_by && comment.liked_by.includes(userName)
+                                comment.liked_by?.includes(userName)
                                   ? 'text-red-500'
                                   : 'text-gray-400 hover:text-red-500'
                               }`}
                             >
                               <Heart size={16} />
-                              <span className="text-sm">{comment.likes}</span>
+                              <span className="text-sm">{comment.likes || 0}</span>
                             </button>
                             {comment.author === userName && (
                               <button
