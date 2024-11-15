@@ -1,380 +1,442 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronUp, Trash2, Heart, MessageSquare } from 'lucide-react';
-import { supabase } from '../utils/supabase';
+import { useEffect, useState } from 'react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { useRouter } from 'next/navigation';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { ThumbsUp, MessageSquare, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 
-export default function IdeasApp() {
-  const [userName, setUserName] = useState('');
+export default function IdeasPage() {
   const [ideas, setIdeas] = useState([]);
-  const [newIdeaTitle, setNewIdeaTitle] = useState('');
+  const [newIdea, setNewIdea] = useState('');
   const [newIdeaDescription, setNewIdeaDescription] = useState('');
-  const [isUserNameSet, setIsUserNameSet] = useState(false);
-  const [newComment, setNewComment] = useState('');
-  const [expandedIdeaId, setExpandedIdeaId] = useState(null);
+  const [comments, setComments] = useState({});
+  const [newComments, setNewComments] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
 
-  // Fetch ideas and their comments
+  const supabase = createClientComponentClient();
+  const router = useRouter();
+
   useEffect(() => {
-    async function fetchIdeas() {
-      const { data, error } = await supabase
-        .from('ideas')
-        .select(`
-          *,
-          comments (
-            id,
-            text,
-            author,
-            likes,
-            liked_by,
-            created_at
-          )
-        `)
-        .order('created_at', { ascending: false });
+    const fetchInitialData = async () => {
+      try {
+        // Get current user
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        setUser(currentUser);
 
-      if (error) {
-        console.error('Error fetching ideas:', error);
-      } else {
-        setIdeas(data || []);
+        // Fetch ideas with votes count
+        const { data: ideasData, error: ideasError } = await supabase
+          .from('ideas')
+          .select(`
+            *,
+            votes:idea_votes(count),
+            comments:idea_comments(count)
+          `)
+          .order('created_at', { ascending: false });
+
+        if (ideasError) throw ideasError;
+
+        // Format votes count
+        const formattedIdeas = ideasData.map(idea => ({
+          ...idea,
+          votes: idea.votes[0]?.count || 0,
+          comments: idea.comments[0]?.count || 0
+        }));
+
+        setIdeas(formattedIdeas);
+        setLoading(false);
+
+        // Fetch all comments
+        const { data: commentsData, error: commentsError } = await supabase
+          .from('idea_comments')
+          .select('*')
+          .order('created_at', { ascending: true });
+
+        if (commentsError) throw commentsError;
+
+        // Group comments by idea_id
+        const groupedComments = commentsData.reduce((acc, comment) => {
+          if (!acc[comment.idea_id]) acc[comment.idea_id] = [];
+          acc[comment.idea_id].push(comment);
+          return acc;
+        }, {});
+
+        setComments(groupedComments);
+      } catch (error) {
+        console.error('Error fetching initial data:', error);
+        toast.error('Failed to load ideas');
       }
-    }
+    };
 
-    // Subscribe to changes
-    const channel = supabase
+    fetchInitialData();
+
+    // Set up real-time subscriptions
+    const ideasSubscription = supabase
       .channel('ideas-channel')
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'ideas' },
-        (payload) => {
-          fetchIdeas();
-      })
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'comments' },
-        (payload) => {
-          fetchIdeas();
-      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'ideas'
+      }, handleIdeasChange)
       .subscribe();
 
-    fetchIdeas();
+    const commentsSubscription = supabase
+      .channel('comments-channel')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'idea_comments'
+      }, handleCommentsChange)
+      .subscribe();
+
+    const votesSubscription = supabase
+      .channel('votes-channel')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'idea_votes'
+      }, handleVotesChange)
+      .subscribe();
 
     return () => {
-      channel.unsubscribe();
+      ideasSubscription.unsubscribe();
+      commentsSubscription.unsubscribe();
+      votesSubscription.unsubscribe();
     };
-  }, []);
+  }, [supabase, router]);
 
-  useEffect(() => {
-    const savedUserName = localStorage.getItem('userName');
-    if (savedUserName) {
-      setUserName(savedUserName);
-      setIsUserNameSet(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (userName) {
-      localStorage.setItem('userName', userName);
-    }
-  }, [userName]);
-
-  const handleUserNameSubmit = (e) => {
-    e.preventDefault();
-    if (userName.trim()) {
-      setIsUserNameSet(true);
+  const handleIdeasChange = (payload) => {
+    if (payload.eventType === 'INSERT') {
+      setIdeas(prev => [payload.new, ...prev]);
+    } else if (payload.eventType === 'DELETE') {
+      setIdeas(prev => prev.filter(idea => idea.id !== payload.old.id));
+    } else if (payload.eventType === 'UPDATE') {
+      setIdeas(prev => prev.map(idea => 
+        idea.id === payload.new.id ? { ...idea, ...payload.new } : idea
+      ));
     }
   };
 
-  const handleNewIdeaSubmit = async (e) => {
-    e.preventDefault();
-    if (newIdeaTitle.trim()) {
-      try {
-        const { data, error } = await supabase
-          .from('ideas')
-          .insert([{
-            title: newIdeaTitle,
-            description: newIdeaDescription || '',
-            author: userName,
-            votes: 0,
-            voters: []
-          }])
-          .select();
-
-        if (error) {
-          console.error('Error details:', error);
-          alert('Failed to submit idea. Please try again.');
-        } else {
-          setNewIdeaTitle('');
-          setNewIdeaDescription('');
-        }
-      } catch (err) {
-        console.error('Submission error:', err);
-        alert('Failed to submit idea. Please try again.');
-      }
+  const handleCommentsChange = (payload) => {
+    if (payload.eventType === 'INSERT') {
+      setComments(prev => ({
+        ...prev,
+        [payload.new.idea_id]: [...(prev[payload.new.idea_id] || []), payload.new]
+      }));
+    } else if (payload.eventType === 'DELETE') {
+      setComments(prev => ({
+        ...prev,
+        [payload.old.idea_id]: prev[payload.old.idea_id]?.filter(
+          comment => comment.id !== payload.old.id
+        )
+      }));
     }
   };
 
-  const handleVote = async (ideaId) => {
-    const idea = ideas.find(i => i.id === ideaId);
-    if (!idea) return;
+  const handleVotesChange = async (payload) => {
+    // Refresh votes count for the affected idea
+    const { data, error } = await supabase
+      .from('idea_votes')
+      .select('count')
+      .eq('idea_id', payload.new.idea_id)
+      .single();
 
-    const hasVoted = idea.voters?.includes(userName);
-    const newVoters = hasVoted 
-      ? (idea.voters || []).filter(voter => voter !== userName)
-      : [...(idea.voters || []), userName];
+    if (!error) {
+      setIdeas(prev => prev.map(idea =>
+        idea.id === payload.new.idea_id
+          ? { ...idea, votes: data.count }
+          : idea
+      ));
+    }
+  };
+
+  const submitIdea = async (e) => {
+    e.preventDefault();
+    if (!user) {
+      toast.error('Please sign in to submit an idea');
+      return;
+    }
+
+    if (!newIdea.trim() || !newIdeaDescription.trim()) {
+      toast.error('Please fill in all fields');
+      return;
+    }
+
+    const newIdeaObj = {
+      id: crypto.randomUUID(),
+      title: newIdea,
+      description: newIdeaDescription,
+      user_id: user.id,
+      created_at: new Date().toISOString(),
+      votes: 0,
+      comments: 0
+    };
+
+    // Optimistic update
+    setIdeas(prev => [newIdeaObj, ...prev]);
+
+    try {
+      const { error } = await supabase
+        .from('ideas')
+        .insert([{
+          title: newIdea,
+          description: newIdeaDescription,
+          user_id: user.id
+        }]);
+
+      if (error) throw error;
+
+      setNewIdea('');
+      setNewIdeaDescription('');
+      toast.success('Idea submitted successfully!');
+    } catch (error) {
+      // Rollback optimistic update
+      setIdeas(prev => prev.filter(idea => idea.id !== newIdeaObj.id));
+      toast.error('Failed to submit idea');
+      console.error('Error submitting idea:', error);
+    }
+  };
+
+  const submitComment = async (ideaId) => {
+    if (!user) {
+      toast.error('Please sign in to comment');
+      return;
+    }
+
+    const commentText = newComments[ideaId]?.trim();
+    if (!commentText) {
+      toast.error('Please enter a comment');
+      return;
+    }
+
+    const newComment = {
+      id: crypto.randomUUID(),
+      idea_id: ideaId,
+      user_id: user.id,
+      content: commentText,
+      created_at: new Date().toISOString(),
+      likes: 0
+    };
+
+    // Optimistic update
+    setComments(prev => ({
+      ...prev,
+      [ideaId]: [...(prev[ideaId] || []), newComment]
+    }));
+
+    try {
+      const { error } = await supabase
+        .from('idea_comments')
+        .insert([{
+          idea_id: ideaId,
+          user_id: user.id,
+          content: commentText
+        }]);
+
+      if (error) throw error;
+
+      setNewComments(prev => ({ ...prev, [ideaId]: '' }));
+      toast.success('Comment added successfully!');
+    } catch (error) {
+      // Rollback optimistic update
+      setComments(prev => ({
+        ...prev,
+        [ideaId]: prev[ideaId].filter(comment => comment.id !== newComment.id)
+      }));
+      toast.error('Failed to add comment');
+      console.error('Error submitting comment:', error);
+    }
+  };
+
+  const toggleVote = async (ideaId, currentVotes) => {
+    if (!user) {
+      toast.error('Please sign in to vote');
+      return;
+    }
+
+    // Optimistic update
+    setIdeas(prev => prev.map(idea =>
+      idea.id === ideaId
+        ? { ...idea, votes: currentVotes + 1 }
+        : idea
+    ));
+
+    try {
+      const { error } = await supabase
+        .rpc('toggle_vote', {
+          idea_id: ideaId
+        });
+
+      if (error) throw error;
+    } catch (error) {
+      // Rollback optimistic update
+      setIdeas(prev => prev.map(idea =>
+        idea.id === ideaId
+          ? { ...idea, votes: currentVotes }
+          : idea
+      ));
+      toast.error('Failed to update vote');
+      console.error('Error toggling vote:', error);
+    }
+  };
+
+  const deleteIdea = async (ideaId) => {
+    if (!user) {
+      toast.error('Please sign in to delete');
+      return;
+    }
+
+    const ideaToDelete = ideas.find(idea => idea.id === ideaId);
     
-    const { error } = await supabase
-      .from('ideas')
-      .update({ 
-        votes: hasVoted ? (idea.votes || 0) - 1 : (idea.votes || 0) + 1,
-        voters: newVoters
-      })
-      .eq('id', ideaId);
+    // Optimistic update
+    setIdeas(prev => prev.filter(idea => idea.id !== ideaId));
 
-    if (error) {
-      console.error('Error updating vote:', error);
-    }
-  };
+    try {
+      const { error } = await supabase
+        .from('ideas')
+        .delete()
+        .eq('id', ideaId)
+        .eq('user_id', user.id);
 
-  const handleDelete = async (ideaId) => {
-    const { error } = await supabase
-      .from('ideas')
-      .delete()
-      .eq('id', ideaId);
-
-    if (error) {
+      if (error) throw error;
+      toast.success('Idea deleted successfully!');
+    } catch (error) {
+      // Rollback optimistic update
+      setIdeas(prev => [...prev, ideaToDelete]);
+      toast.error('Failed to delete idea');
       console.error('Error deleting idea:', error);
     }
   };
 
-  const handleCommentSubmit = async (ideaId, e) => {
-    if (e && e.key === 'Enter') {
-      e.preventDefault();
-    } else if (e && e.type === 'keypress' && e.key !== 'Enter') {
+  const deleteComment = async (commentId, ideaId) => {
+    if (!user) {
+      toast.error('Please sign in to delete');
       return;
     }
-    
-    if (newComment.trim()) {
-      try {
-        const { error } = await supabase
-          .from('comments')
-          .insert([{
-            idea_id: ideaId,
-            text: newComment,
-            author: userName,
-            likes: 0,
-            liked_by: []
-          }]);
 
-        if (error) {
-          console.error('Error details:', error);
-          alert('Failed to submit comment. Please try again.');
-        } else {
-          setNewComment('');
-        }
-      } catch (err) {
-        console.error('Comment submission error:', err);
-        alert('Failed to submit comment. Please try again.');
-      }
-    }
-  };
+    const commentToDelete = comments[ideaId]?.find(comment => comment.id === commentId);
 
-  const handleCommentDelete = async (commentId) => {
-    const { error } = await supabase
-      .from('comments')
-      .delete()
-      .eq('id', commentId);
+    // Optimistic update
+    setComments(prev => ({
+      ...prev,
+      [ideaId]: prev[ideaId].filter(comment => comment.id !== commentId)
+    }));
 
-    if (error) {
+    try {
+      const { error } = await supabase
+        .from('idea_comments')
+        .delete()
+        .eq('id', commentId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+      toast.success('Comment deleted successfully!');
+    } catch (error) {
+      // Rollback optimistic update
+      setComments(prev => ({
+        ...prev,
+        [ideaId]: [...prev[ideaId], commentToDelete]
+      }));
+      toast.error('Failed to delete comment');
       console.error('Error deleting comment:', error);
     }
   };
 
-  const toggleExpand = (ideaId) => {
-    setExpandedIdeaId(expandedIdeaId === ideaId ? null : ideaId);
-  };
-
-  const handleCommentLike = async (commentId, currentLikes, currentLikedBy) => {
-    const hasLiked = currentLikedBy?.includes(userName);
-    const newLikedBy = hasLiked 
-      ? (currentLikedBy || []).filter(liker => liker !== userName)
-      : [...(currentLikedBy || []), userName];
-
-    const { error } = await supabase
-      .from('comments')
-      .update({ 
-        likes: hasLiked ? currentLikes - 1 : currentLikes + 1,
-        liked_by: newLikedBy
-      })
-      .eq('id', commentId);
-
-    if (error) {
-      console.error('Error updating comment like:', error);
-    }
-  };
-
-  if (!isUserNameSet) {
-    return (
-      <div className="min-h-screen bg-gray-50 p-8">
-        <div className="max-w-2xl mx-auto">
-          <form onSubmit={handleUserNameSubmit} className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-2xl font-semibold mb-4 text-gray-800">Welcome to Ideas Hub</h2>
-            <div className="space-y-4">
-              <input
-                type="text"
-                value={userName}
-                onChange={(e) => setUserName(e.target.value)}
-                placeholder="Enter your name"
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-                required
-              />
-              <button
-                type="submit"
-                className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-              >
-                Get Started
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    );
+  if (loading) {
+    return <div className="flex justify-center items-center min-h-screen">Loading...</div>;
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-2xl mx-auto space-y-6">
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h1 className="text-2xl font-semibold mb-6 text-gray-800">Idea Submission and Voting</h1>
-          
-          <form onSubmit={handleNewIdeaSubmit} className="space-y-4">
-            <div>
-              <input
-                type="text"
-                value={newIdeaTitle}
-                onChange={(e) => setNewIdeaTitle(e.target.value)}
-                placeholder="New Idea Title"
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-                required
-              />
-            </div>
-            <div>
-              <textarea
-                value={newIdeaDescription}
-                onChange={(e) => setNewIdeaDescription(e.target.value)}
-                placeholder="New Idea Description (optional)"
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors resize-none h-24"
-              />
-            </div>
-            <button
-              type="submit"
-              className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-            >
-              Submit Idea
-            </button>
-          </form>
-        </div>
+    <div className="max-w-4xl mx-auto p-4 space-y-6">
+      <form onSubmit={submitIdea} className="space-y-4">
+        <Input
+          placeholder="Your idea title"
+          value={newIdea}
+          onChange={(e) => setNewIdea(e.target.value)}
+          className="w-full"
+        />
+        <Textarea
+          placeholder="Describe your idea..."
+          value={newIdeaDescription}
+          onChange={(e) => setNewIdeaDescription(e.target.value)}
+          className="w-full"
+        />
+        <Button type="submit" className="w-full">Submit Idea</Button>
+      </form>
 
-        <div className="space-y-4">
-          {ideas.map(idea => (
-            <div key={idea.id} className="bg-white rounded-lg shadow-md p-6">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <h2 className="text-xl font-semibold text-gray-800">{idea.title}</h2>
-                  {idea.description && (
-                    <p className="mt-2 text-gray-600">{idea.description}</p>
-                  )}
-                  <p className="mt-2 text-sm text-gray-500">Submitted by {idea.author}</p>
+      <div className="space-y-4">
+        {ideas.map((idea) => (
+          <Card key={idea.id} className="w-full">
+            <CardContent className="p-6 space-y-4">
+              <div className="flex justify-between items-start">
+                <div className="space-y-2">
+                  <h3 className="text-lg font-semibold">{idea.title}</h3>
+                  <p className="text-gray-600">{idea.description}</p>
                 </div>
-                {idea.author === userName && (
-                  <div className="flex space-x-2 ml-4">
-                    <button
-                      onClick={() => handleDelete(idea.id)}
-                      className="text-gray-400 hover:text-red-500 transition-colors"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
+                {user?.id === idea.user_id && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => deleteIdea(idea.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 )}
               </div>
 
-              <div className="mt-4 flex items-center space-x-4">
-                <button
-                  onClick={() => handleVote(idea.id)}
-                  className="flex items-center space-x-1 px-3 py-1 rounded-md transition-all bg-blue-100 text-blue-600 hover:font-bold"
+              <div className="flex gap-4">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => toggleVote(idea.id, idea.votes)}
                 >
-                  <ChevronUp size={18} />
-                  <span>{idea.votes || 0}</span>
-                </button>
-
-                <button
-                  onClick={() => toggleExpand(idea.id)}
-                  className="flex items-center space-x-1 text-gray-500 hover:text-gray-700 transition-colors"
-                >
-                  <MessageSquare size={18} />
-                  <span>{idea.comments?.length || 0}</span>
-                  {expandedIdeaId === idea.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                </button>
+                  <ThumbsUp className="h-4 w-4 mr-2" />
+                  {idea.votes}
+                </Button>
+                <Button variant="ghost" size="sm">
+                  <MessageSquare className="h-4 w-4 mr-2" />
+                  {(comments[idea.id] || []).length}
+                </Button>
               </div>
 
-              {expandedIdeaId === idea.id && (
-                <div className="mt-4 space-y-4">
-                  <div className="border-t pt-4">
-                    <div className="flex space-x-2">
-                      <input
-                        type="text"
-                        value={newComment}
-                        onChange={(e) => setNewComment(e.target.value)}
-                        onKeyPress={(e) => handleCommentSubmit(idea.id, e)}
-                        placeholder="Add a comment..."
-                        className="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-                      />
-                      <button
-                        onClick={() => handleCommentSubmit(idea.id)}
-                        className="bg-gray-100 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+              <div className="space-y-4">
+                {comments[idea.id]?.map((comment) => (
+                  <div key={comment.id} className="flex justify-between items-start bg-gray-50 p-3 rounded">
+                    <p>{comment.content}</p>
+                    {user?.id === comment.user_id && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => deleteComment(comment.id, idea.id)}
                       >
-                        Comment
-                      </button>
-                    </div>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
+                ))}
 
-                  {idea.comments && idea.comments
-                    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
-                    .map(comment => (
-                      <div key={comment.id} className="bg-gray-50 rounded-md p-4">
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <p className="text-gray-800">{comment.text}</p>
-                            <p className="mt-1 text-sm text-gray-500">
-                              By {comment.author}
-                            </p>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <button
-                              onClick={() => handleCommentLike(comment.id, comment.likes || 0, comment.liked_by)}
-                              className={`flex items-center space-x-1 px-2 py-1 rounded-md transition-colors ${
-                                comment.liked_by?.includes(userName)
-                                  ? 'text-red-500'
-                                  : 'text-gray-400 hover:text-red-500'
-                              }`}
-                            >
-                              <Heart size={16} />
-                              <span className="text-sm">{comment.likes || 0}</span>
-                            </button>
-                            {comment.author === userName && (
-                              <button
-                                onClick={() => handleCommentDelete(comment.id)}
-                                className="text-gray-400 hover:text-red-500 transition-colors p-1 rounded-md"
-                                title="Delete comment"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Add a comment..."
+                    value={newComments[idea.id] || ''}
+                    onChange={(e) => setNewComments(prev => ({
+                      ...prev,
+                      [idea.id]: e.target.value
+                    }))}
+                  />
+                  <Button onClick={() => submitComment(idea.id)}>
+                    Comment
+                  </Button>
                 </div>
-              )}
-            </div>
-          ))}
-        </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
     </div>
   );
